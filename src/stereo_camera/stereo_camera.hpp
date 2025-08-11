@@ -2,15 +2,30 @@
 #pragma once
 
 #ifdef Vector2
-#undef Vector2
+#  undef Vector2
 #endif
 #ifdef Vector3
-#undef Vector3
+#  undef Vector3
 #endif
 #ifdef Vector4
-#undef Vector4
+#  undef Vector4
 #endif
-
+#ifdef min   // just in case
+#  undef min
+#endif
+#ifdef max
+#  undef max
+#endif
+#pragma push_macro("Vector2")
+#pragma push_macro("Vector3")
+#pragma push_macro("Vector4")
+#undef Vector2
+#undef Vector3
+#undef Vector4
+#include <sl/Camera.hpp>
+#pragma pop_macro("Vector2")
+#pragma pop_macro("Vector3")
+#pragma pop_macro("Vector4")
 #include <sl/Camera.hpp>
 #include "stereo_camera_kernels.cuh"
 
@@ -109,25 +124,15 @@ public:
         std::atomic_store_explicit(&ready_event_, d.ready_event, std::memory_order_release);
     }
         
-    void start(bool from_svo, auto input, bool recording, std::string outputPath) {
-        if (running_.exchange(true)) return; // already running
-
-        init(from_svo, input, recording, outputPath);
-
-        worker_ = std::jthread([this](std::stop_token st){
-            // Make ZED's CUDA context current on THIS thread once
-            CUcontext zed_ctx = zed_.getCUDAContext();
-            cuCtxSetCurrent(zed_ctx);
-
-            // Main capture loop
-            while (!st.stop_requested() && running_.load(std::memory_order_relaxed)) {
-                if (!this->grab()) {
-                    // brief backoff on grab failure to avoid hot spin
-                    std::this_thread::sleep_for(std::chrono::milliseconds(2));
-                }
-                // No sleep on success; ZED FPS naturally paces the loop
-            }
-        });
+    void start_from_svo(const std::string& path, bool recording, const std::string& out) {
+        if (running_.exchange(true)) return;
+        init_from_svo(path, recording, out);
+        worker_ = std::jthread([this](std::stop_token st){ run_loop(st); });
+    }
+    void start_from_serial(uint32_t serial, bool recording, const std::string& out) {
+        if (running_.exchange(true)) return;
+        init_from_serial(serial, recording, out);
+        worker_ = std::jthread([this](std::stop_token st){ run_loop(st); });
     }
 
     void stop() {
@@ -285,12 +290,14 @@ private:
 
     }
 
+
     void alloc_outputs() {
         const size_t bytes = static_cast<size_t>(3) * W_ * H_ * sizeof(__half);
         if (cudaMalloc(&d_out_[0], bytes) != cudaSuccess) std::abort();
         if (cudaMalloc(&d_out_[1], bytes) != cudaSuccess) std::abort();
         cur_ = 0;
     }
+
     void prep_desc_template() {
         desc_template_.dev_ptr = nullptr;
         desc_template_.shape[0] = 1;        // N
@@ -305,10 +312,49 @@ private:
         desc_template_.seq   = 0;
         desc_template_.ts_ns = 0;
     }
+
     static uint64_t now_ns() {
         using namespace std::chrono;
         return duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
     }
+
+    void init_from_svo(const std::string& path, bool recording, const std::string& out) {
+        sl::InitParameters ip;
+        open_from_svo(ip, path);
+        ip.svo_real_time_mode = true;
+        common_open(ip, recording, /*svo=*/true, out);
+    }
+    void init_from_serial(uint32_t serial, bool recording, const std::string& out) {
+        sl::InitParameters ip;
+        open_from_serial(ip, serial);
+        common_open(ip, recording, /*svo=*/false, out);
+    }
+
+    void common_open(sl::InitParameters& ip, bool recording, bool svo, const std::string& out) {
+        ip.camera_resolution = p_.open_resolution;
+        ip.camera_fps        = p_.fps;
+        if (zed_.open(ip) != sl::ERROR_CODE::SUCCESS) std::abort();
+        runtime_ = sl::RuntimeParameters{};
+        W_ = p_.width; H_ = p_.height;
+        frame_gpu_ = sl::Mat(W_, H_, sl::MAT_TYPE::U8_C4, sl::MEM::GPU);
+        init_object_detection();
+        if (recording && !svo) {
+            sl::RecordingParameters rp;
+            rp.compression_mode = sl::SVO_COMPRESSION_MODE::H264;
+            rp.video_filename   = sl::String(out.c_str());
+            zed_.enableRecording(rp);
+        }
+        stream_ = reinterpret_cast<cudaStream_t>(zed_.getCUDAStream());
+    }
+
+    void run_loop(std::stop_token st){
+        CUcontext zed_ctx = zed_.getCUDAContext();
+        cuCtxSetCurrent(zed_ctx);
+        while (!st.stop_requested() && running_.load(std::memory_order_relaxed)) {
+            if (!grab()) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+    }
+
     void cleanup() {
         if (d_out_[0]) { cudaFree(d_out_[0]); d_out_[0] = nullptr; }
         if (d_out_[1]) { cudaFree(d_out_[1]); d_out_[1] = nullptr; }
