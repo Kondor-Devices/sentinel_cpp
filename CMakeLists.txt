@@ -1,39 +1,96 @@
-cmake_minimum_required(VERSION 3.24)
-project(zed_opencv_demo LANGUAGES CXX CUDA)
+cmake_minimum_required(VERSION 3.22)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# Project
+project(SentinelCpp LANGUAGES CXX CUDA)
 
-# Jetson arch: Orin (Ampere)=87, Xavier (Volta)=72, Nano (Maxwell)=53
-# Set the one you have:
-set(CMAKE_CUDA_ARCHITECTURES 87)
+# ---- Build options ----
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-list(APPEND CMAKE_PREFIX_PATH "/usr/local/zed")
+# Default to a sensible build type
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
+endif()
 
-find_package(ZED 5 REQUIRED)
-find_package(OpenCV REQUIRED)
+# Warnings (tweak to taste)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic -Wno-unknown-pragmas)
+endif()
+
+# ---- Dependencies ----
+
+# CUDA runtime (for cudaMemcpyAsync, events, etc.)
 find_package(CUDAToolkit REQUIRED)
 
-add_library(stereo_kernels STATIC stereo_camera_kernels.cu)
-target_include_directories(stereo_kernels PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-set_target_properties(stereo_kernels PROPERTIES
-    CUDA_SEPARABLE_COMPILATION ON
-    POSITION_INDEPENDENT_CODE ON
+# OpenCV (viewer)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui imgcodecs)
+
+# Threads (std::jthread still links libpthread on Linux)
+find_package(Threads REQUIRED)
+
+# ZED SDK: simple manual find (works on Jetson + /usr/local/zed install)
+find_path(ZED_INCLUDE_DIR
+  NAMES sl/Camera.hpp
+  HINTS /usr/local/zed/include /usr/local/include /opt/zed/include
+)
+find_library(ZED_LIBRARY
+  NAMES sl_zed
+  HINTS /usr/local/zed/lib /usr/local/lib /opt/zed/lib
 )
 
-add_executable(zed_opencv_app main.cpp)
-target_include_directories(zed_opencv_app PRIVATE
-    ${ZED_INCLUDE_DIRS}
-    ${OpenCV_INCLUDE_DIRS}
-    ${CUDAToolkit_INCLUDE_DIRS}
+if(NOT ZED_INCLUDE_DIR OR NOT ZED_LIBRARY)
+  message(FATAL_ERROR "ZED SDK not found. Ensure headers in /usr/local/zed/include and libsl_zed.so in /usr/local/zed/lib")
+endif()
+
+# ---- Sources ----
+# Grab every .cpp under src/ (headers included via target_include_directories)
+file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS
+  "${CMAKE_SOURCE_DIR}/src/*.cpp"
 )
-target_link_libraries(zed_opencv_app PRIVATE
-    stereo_kernels
-    ${ZED_LIBRARIES}
-    ${OpenCV_LIBS}
+
+if(SRC_FILES STREQUAL "")
+  message(FATAL_ERROR "No .cpp files found under src/.")
+endif()
+
+# ---- Executable ----
+add_executable(sentinel_app ${SRC_FILES})
+
+# Include paths
+target_include_directories(sentinel_app
+  PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${ZED_INCLUDE_DIR}
+)
+
+# Libraries
+target_link_libraries(sentinel_app
+  PRIVATE
+    Threads::Threads
     CUDA::cudart
+    ${ZED_LIBRARY}
+    ${OpenCV_LIBS}
 )
 
-# Runtime search paths (Jetson defaults)
-set(CMAKE_BUILD_RPATH "/usr/local/zed/lib;/usr/local/cuda/lib64")
-set(CMAKE_INSTALL_RPATH "/usr/local/zed/lib;/usr/local/cuda/lib64")
+# Position independent code (helps when mixing CUDA/host objects)
+set_target_properties(sentinel_app PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+)
+
+# On Jetson, ensure runtime can locate ZED .so without LD_LIBRARY_PATH
+# (adjust/add OpenCV rpath if your OpenCV lives outside system paths)
+set_target_properties(sentinel_app PROPERTIES
+  BUILD_RPATH "${CMAKE_INSTALL_RPATH};/usr/local/zed/lib"
+  INSTALL_RPATH "/usr/local/zed/lib"
+)
+
+# Faster NVCC compilation (optional)
+if(CMAKE_CUDA_COMPILER)
+  target_compile_options(sentinel_app PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+  )
+endif()
+
+# ---- Install (optional) ----
+install(TARGETS sentinel_app RUNTIME DESTINATION bin)
