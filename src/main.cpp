@@ -1,6 +1,8 @@
 #include "stereo_camera/stereo_camera.hpp"
 #include "utils/input_sources.hpp"
 #include "yolo_manager/yolo_manager.hpp"
+#include "visualizer/batch_publisher.hpp"
+#include "visualizer/batch_viewer.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -13,6 +15,7 @@
 #include <tuple>
 #include <vector>
 
+extern char **environ;
 
 static void print_usage(const char* prog) {
     std::cout <<
@@ -90,6 +93,11 @@ int main(int argc, char** argv) {
     
     YoloManager yolo;
     yolo_manager_startup(yolo, cams);
+
+    auto pub_thread = ipc::start_frame_publisher(cams);
+
+    ViewerProcess viewer;
+    viewer.start(); 
 
     while (g_running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
