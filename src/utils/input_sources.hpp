@@ -118,7 +118,7 @@ inline std::vector<int> parse_indices_exact(const std::string& line, int max_ind
 } // namespace get_svos_helpers
 
 // --- Main interactive SVO picker (CWD/svos) ---
-inline std::vector<std::string> get_svos(std::string svo_dir) {
+inline std::vector<std::string> get_svos(const std::string& svo_dir) {
     using namespace get_svos_helpers;
     namespace fs = std::filesystem;
 

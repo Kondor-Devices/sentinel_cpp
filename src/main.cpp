@@ -68,7 +68,7 @@ std::vector<std::unique_ptr<CameraModule>> start_cameras(const InputSelection& i
 
 void yolo_manager_startup(YoloManager& yolo, const std::vector<std::unique_ptr<CameraModule>>& cams) {
     for (auto& cam : cams) {
-        yolo.add_camera(*cam);
+        yolo.add_camera(cam.get());
     };
     yolo.start();
 

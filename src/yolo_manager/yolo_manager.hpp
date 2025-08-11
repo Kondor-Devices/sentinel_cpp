@@ -7,7 +7,7 @@
 #include <chrono>
 #include <cuda_runtime.h>
 
-#include "stereo_camera.hpp"   // CameraModule, DetsGpuDesc, GpuFrameDesc
+#include "stereo_camera/stereo_camera.hpp"   // CameraModule, DetsGpuDesc, GpuFrameDesc
 
 class YoloManager {
 public:

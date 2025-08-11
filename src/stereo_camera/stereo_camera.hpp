@@ -1,5 +1,16 @@
 // stereo_camera.hpp
 #pragma once
+
+#ifdef Vector2
+#undef Vector2
+#endif
+#ifdef Vector3
+#undef Vector3
+#endif
+#ifdef Vector4
+#undef Vector4
+#endif
+
 #include <sl/Camera.hpp>
 #include "stereo_camera_kernels.cuh"
 
@@ -14,7 +25,7 @@
 #include <algorithm>
 #include <iostream>
 #include <thread>
-#include <mutex>
+
 
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
@@ -77,8 +88,8 @@ public:
         int fps    = 15;
         sl::RESOLUTION open_resolution = sl::RESOLUTION::SVGA;
     };
-
-    explicit CameraModule(const Params& p = Params()) : p_(p) {}
+    CameraModule() : p_{} {}
+    explicit CameraModule(const Params& p) : p_(p) {}
 
     // Forbid copying and moving, forces new instance creation
     CameraModule(const CameraModule&) = delete;
@@ -154,6 +165,9 @@ private:
     std::jthread           worker_;
     std::atomic<bool>      running_{false};
 
+    using TrkSnapshot = std::shared_ptr<const std::vector<Trk2D>>;
+    LatestOnlyT<TrkSnapshot> latest_trk_;
+
 
     void ingestAndRetrieve() {
         // 1) snapshot latest GPU detections
@@ -206,7 +220,8 @@ private:
                 float y1 = std::max({bb[0].y,bb[1].y,bb[2].y,bb[3].y});
                 v.push_back(Trk2D{ o.id, (int)o.label, o.confidence, x0,y0,x1,y1 });
             }
-            latest_trk_.publish(std::make_shared<std::vector<Trk2D>>(std::move(v)));
+            auto owned = std::make_shared<const std::vector<Trk2D>>(std::move(v));
+            latest_trk_.publish(owned);
         }
     }
 
@@ -228,15 +243,23 @@ private:
         }
     }
 
+    void open_from_svo(sl::InitParameters& ip, const std::string& path) {
+        ip.input.setFromSVOFile(sl::String(path.c_str()));
+    }
+
+    void open_from_serial(sl::InitParameters& ip, uint32_t serial) {
+        ip.input.setFromSerialNumber(static_cast<unsigned int>(serial));
+    }
+
     void open_camera(bool svo, auto input, bool recording, std::string outputPath) {
         sl::InitParameters ip;
         ip.camera_resolution = p_.open_resolution; // sensor mode (enum)
         ip.camera_fps        = p_.fps;
         if (svo) {
-            ip.input.setFromSVOFile(input);
+            open_from_svo(ip, input);
             ip.svo_real_time_mode = true;
         } else {
-            ip.input.setFromSerialNumber(input);
+            open_from_serial(ip, input);
         }
 
 
@@ -251,7 +274,7 @@ private:
         if (recording && !svo) {
             sl::RecordingParameters recordingParams;
             recordingParams.compression_mode = sl::SVO_COMPRESSION_MODE::H264;
-            recordingParams.video_filename = outputPath;
+            recordingParams.video_filename = sl::String(outputPath.c_str());
             zed_.enableRecording(recordingParams);
 
         }
@@ -305,9 +328,8 @@ private:
             return false;
         }
         // 3) Source BGRA8 (pitched) on device
-        const unsigned char* src = reinterpret_cast<const unsigned char*>(
-            frame_gpu_.getPtr<sl::uchar1>(sl::MEM::GPU)
-        );
+        const sl::uchar4* p4 = frame_gpu_.getPtr<sl::uchar4>(sl::MEM::GPU);
+        const unsigned char* src = reinterpret_cast<const unsigned char*>(p4);
         const size_t pitch = frame_gpu_.getStepBytes(sl::MEM::GPU);
 
         // 4) Ping-Pong output buffer
@@ -343,7 +365,7 @@ private:
     sl::RuntimeParameters runtime_;
     sl::Mat               frame_gpu_;
 
-    int                   W_{0}, H_{0};   // set in open_camera()
+    int                   W_, H_;   // set in open_camera()
     cudaStream_t          stream_{nullptr};
     void*                 d_out_[2]{nullptr, nullptr};
     int                   cur_{0};
@@ -352,7 +374,6 @@ private:
     GpuFrameDesc          desc_template_{};
     LatestOnlyT<GpuFrameDesc> latest_;          // frames (unchanged behavior)
     LatestOnlyT<GpuFrameDesc> latest_dets_gpu_; // YOLO dets descriptor (GPU)
-    using TrkSnapshot = std::shared_ptr<const std::vector<Trk2D>>;
-    LatestOnlyT<TrkSnapshot> latest_trk_;
+    
 };
 
