@@ -17,20 +17,8 @@
 
 #include <opencv2/opencv.hpp>
 
-// ---------- Shared-memory schema (matches your publisher) ----------
-namespace ipc {
-static constexpr uint32_t kMagic   = 0xBA7C4F1u;
-static constexpr uint32_t kVersion = 1;
+#include "visualizer/ipc_common.hpp"
 
-struct alignas(64) BatchHeader {
-    uint32_t magic;
-    uint32_t version;
-    int32_t  N, C, H, W;
-    uint64_t ts_ns;
-    std::atomic<uint64_t> seq; // even=stable, odd=writing
-    uint64_t valid_mask;
-};
-} // namespace ipc
 
 // ---------- ViewerProcess: forks a child that runs the OpenCV viewer ----------
 class ViewerProcess {

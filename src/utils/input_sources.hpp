@@ -13,12 +13,12 @@ struct InputSelection {
     bool from_svo = false;                 // true => use svos, false => use serials
     bool record = false;                   // true => record
     std::vector<std::string> svos;         // valid when from_svo == true
-    std::vector<uint64_t>    serials;      // valid when from_svo == false
-    std::string svo_dir
+    std::vector<uint64_t> serials;      // valid when from_svo == false
+    std::string svo_dir;
 };
 
 // Forward declare (defined below). Mark inline since this is a header.
-inline std::vector<std::string> get_svos();
+inline std::vector<std::string> get_svos(const std::string& svo_dir); 
 
 // --- Top-level resolver ---
 inline InputSelection resolve_inputs(bool from_svo, std::string svo_dir, bool record) {
@@ -27,6 +27,7 @@ inline InputSelection resolve_inputs(bool from_svo, std::string svo_dir, bool re
     sel.svo_dir = svo_dir;
 
     if (from_svo) {
+        sel.record = false;
         sel.svos = get_svos(svo_dir);    // CWD/svos interactive picker
     } else {
         sel.record = record;

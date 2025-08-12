@@ -16,20 +16,9 @@
 #include <cuda_fp16.h>
 
 #include "stereo_camera/stereo_camera.hpp" // for CameraModule, GpuFrameDesc
+#include "visualizer/ipc_common.hpp"
 
 namespace ipc {
-
-constexpr uint32_t kMagic   = 0xBA7C4F1u;
-constexpr uint32_t kVersion = 1;
-
-struct alignas(64) BatchHeader {
-    uint32_t magic;
-    uint32_t version;
-    int32_t  N, C, H, W;
-    uint64_t ts_ns;
-    std::atomic<uint64_t> seq;
-    uint64_t valid_mask;         // bit i = 1 if cam i updated this batch
-};
 
 inline std::string frames_shm_name() { return "/kdi_frames_batch"; }
 
@@ -73,6 +62,7 @@ inline std::thread start_frame_publisher(std::vector<std::unique_ptr<CameraModul
     if (!create_or_resize_shm(frames_shm_name(), total_bytes, shm_fd, shm_addr)) {
         throw std::runtime_error("Failed to create shm");
     }
+    ::close(shm_fd);  // <-- add this after mmap succeeds
     auto* hdr  = reinterpret_cast<BatchHeader*>(shm_addr);
     auto* data = reinterpret_cast<uint8_t*>(shm_addr) + sizeof(BatchHeader);
 
