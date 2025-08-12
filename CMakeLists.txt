@@ -1,26 +1,22 @@
 cmake_minimum_required(VERSION 3.22)
-
-# Project
 project(SentinelCpp LANGUAGES CXX CUDA)
 
 # ---- Build options ----
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 20)                # drop to 17 if ZED complains
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
-# Default to a sensible build type
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
-# Warnings (tweak to taste)
+# Warnings
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -Wno-unknown-pragmas)
 endif()
 
 # ---- Dependencies ----
-
 find_package(CUDAToolkit REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc highgui imgcodecs)
 find_package(Threads REQUIRED)
@@ -35,7 +31,7 @@ find_library(ZED_LIBRARY
   HINTS /usr/local/zed/lib /usr/local/lib /opt/zed/lib
 )
 if(NOT ZED_INCLUDE_DIR OR NOT ZED_LIBRARY)
-  message(FATAL_ERROR "ZED SDK not found. Ensure headers in /usr/local/zed/include and libsl_zed.so in /usr/local/zed/lib")
+  message(FATAL_ERROR "ZED SDK not found. Need headers in /usr/local/zed/include and libsl_zed.so in /usr/local/zed/lib")
 endif()
 
 # ---- Sources ----
@@ -47,30 +43,28 @@ endif()
 # ---- Executable ----
 add_executable(sentinel_app ${SRC_FILES})
 
-# Include paths
+# Include paths (AFTER add_executable)
 target_include_directories(sentinel_app
   PRIVATE
-    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src         # so "compile_utils/..." resolves
+    ${OpenCV_INCLUDE_DIRS}
 )
-# Treat ZED headers as system to silence their warnings
+# Treat ZED headers as system to hush their warnings
 target_include_directories(sentinel_app SYSTEM PRIVATE ${ZED_INCLUDE_DIR})
 
-# Global hammer: remove any Vector* macros for all C/C++
-add_compile_options(-UVector2 -UVector3 -UVector4)
-
-# Per-language (CXX) in case you keep CUDA/C mixed:
+# Inject the macro-killer header BEFORE every C++ TU
+# (must be two separate args so compilers parse it)
 target_compile_options(sentinel_app PRIVATE
-  $<$<COMPILE_LANGUAGE:CXX>:-UVector2>
-  $<$<COMPILE_LANGUAGE:CXX>:-UVector3>
-  $<$<COMPILE_LANGUAGE:CXX>:-UVector4>
+  $<$<COMPILE_LANGUAGE:CXX>:-include>
+  $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/src/compile_utils/kill_vector_macros.hpp>
 )
 
-# Libraries
+# Link libraries
 target_link_libraries(sentinel_app
   PRIVATE
     Threads::Threads
     CUDA::cudart
-    CUDA::cuda_driver      # needed for cuCtxSetCurrent (CUDA Driver API)
+    CUDA::cuda_driver
     ${ZED_LIBRARY}
     ${OpenCV_LIBS}
 )
@@ -80,20 +74,6 @@ set_target_properties(sentinel_app PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # RPATH for ZED
 set_target_properties(sentinel_app PROPERTIES
-  BUILD_RPATH "${CMAKE_INSTALL_RPATH};/usr/local/zed/lib"
+  BUILD_RPATH "/usr/local/zed/lib"
   INSTALL_RPATH "/usr/local/zed/lib"
 )
-
-# Faster NVCC compilation (optional)
-if(CMAKE_CUDA_COMPILER)
-  target_compile_options(sentinel_app PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
-  )
-endif()
-
-target_compile_options(sentinel_app PRIVATE
-  $<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/compile_utils/kill_vector_macros.hpp>
-)
-
-# ---- Install (optional) ----
-install(TARGETS sentinel_app RUNTIME DESTINATION bin)
