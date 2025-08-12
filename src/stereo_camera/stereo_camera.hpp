@@ -1,24 +1,32 @@
 // stereo_camera.hpp
 #pragma once
 
-// ---- Prevent macro collisions with ZED vector types (and Windows-style min/max) ----
+// Only push if defined; then undef before including ZED
 #ifdef Vector2
-#  undef Vector2
+  #pragma push_macro("Vector2")
+  #undef Vector2
 #endif
 #ifdef Vector3
-#  undef Vector3
+  #pragma push_macro("Vector3")
+  #undef Vector3
 #endif
 #ifdef Vector4
-#  undef Vector4
-#endif
-#ifdef min
-#  undef min
-#endif
-#ifdef max
-#  undef max
+  #pragma push_macro("Vector4")
+  #undef Vector4
 #endif
 
-#include <sl/Camera.hpp>
+#include <sl/Camera.hpp>   // <-- safe now
+
+// Restore only those that were pushed
+#ifdef Vector2
+  #pragma pop_macro("Vector2")
+#endif
+#ifdef Vector3
+  #pragma pop_macro("Vector3")
+#endif
+#ifdef Vector4
+  #pragma pop_macro("Vector4")
+#endif
 
 #include "stereo_camera_kernels.cuh"
 
@@ -364,6 +372,8 @@ private:
         if (h_dets_)   { cudaFreeHost(h_dets_); h_dets_ = nullptr; }
         if (frame_gpu_.isInit()) frame_gpu_.free();
         if (zed_.isOpened()) zed_.close();
+        if (h_dets_) { cudaFreeHost(h_dets_); h_dets_ = nullptr; }
+        h_dets_bytes_ = 0;
     }
 
     // ---- state ----
@@ -382,6 +392,12 @@ private:
     LatestOnlyT<GpuFrameDesc>   latest_;          // frames
     LatestOnlyT<GpuFrameDesc>   latest_dets_gpu_; // YOLO dets descriptor (GPU)
     std::atomic<cudaEvent_t>    ready_event_{nullptr};
+
+    // In CameraModule private section
+    LatestOnlyT<std::shared_ptr<std::vector<Trk2D>>> latest_trk_{};
+
+    void*   h_dets_ = nullptr;         // pinned host buffer for dets
+    size_t  h_dets_bytes_ = 0;         // size of pinned host buffer
 
     std::jthread           worker_;
     std::atomic<bool>      running_{false};

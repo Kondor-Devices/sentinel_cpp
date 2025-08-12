@@ -53,13 +53,13 @@ std::vector<std::unique_ptr<CameraModule>> start_cameras(const InputSelection& i
     if (inputs.from_svo) {
         for (const std::string& svo : inputs.svos) {
             auto cam = std::make_unique<CameraModule>();
-            cam->start_from_svo(inputs.from_svo, svo, inputs.record, inputs.svo_dir);
+            cam->start_from_svo(svo, inputs.record, inputs.svo_dir);
             cams.emplace_back(std::move(cam));
         };
     } else {
         for (const uint64_t& serial : inputs.serials) {
             auto cam =  std::make_unique<CameraModule>();
-            cam->start_from_serial(inputs.from_svo, serial, inputs.record, inputs.svo_dir);
+            cam->start_from_serial(serial, inputs.record, inputs.svo_dir);
             cams.emplace_back(std::move(cam));
         };
     }

@@ -94,7 +94,7 @@ private:
         return true;
     }
 
-    static cv::Mat nchw_fp16_rgb_to_bgr8(const __fp16* src, int C, int H, int W) {
+    static cv::Mat nchw_fp16_rgb_to_bgr8(const __fp16* src, int /*C*/, int H, int W) {
         const int64_t strideC = static_cast<int64_t>(H) * W;
         const __fp16* r = src + 0*strideC;
         const __fp16* g = src + 1*strideC;
@@ -104,7 +104,8 @@ private:
         uint8_t* dst = out.data;
 
         auto sat = [](float v)->uint8_t {
-            if (v < 0.f) v = 0.f; if (v > 1.f) v = 1.f;
+            if (v < 0.f) { v = 0.f; }
+            if (v > 1.f) { v = 1.f; }
             return static_cast<uint8_t>(v * 255.f + 0.5f);
         };
 
