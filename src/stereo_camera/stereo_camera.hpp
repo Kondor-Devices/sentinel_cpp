@@ -1,39 +1,8 @@
 // stereo_camera.hpp
 #pragma once
 
-// ---------- Neutralize any Vector2/3/4 macros exactly at the ZED include site ----------
-#ifdef Vector2
-  #pragma push_macro("Vector2")
-  #undef Vector2
-  #define HAD_MACRO_Vector2 1
-#endif
-#ifdef Vector3
-  #pragma push_macro("Vector3")
-  #undef Vector3
-  #define HAD_MACRO_Vector3 1
-#endif
-#ifdef Vector4
-  #pragma push_macro("Vector4")
-  #undef Vector4
-  #define HAD_MACRO_Vector4 1
-#endif
 
-#include <sl/Camera.hpp>   // include ZED first, while Vector* macros are undef'd
-
-#ifdef HAD_MACRO_Vector2
-  #pragma pop_macro("Vector2")
-  #undef HAD_MACRO_Vector2
-#endif
-#ifdef HAD_MACRO_Vector3
-  #pragma pop_macro("Vector3")
-  #undef HAD_MACRO_Vector3
-#endif
-#ifdef HAD_MACRO_Vector4
-  #pragma pop_macro("Vector4")
-  #undef HAD_MACRO_Vector4
-#endif
-// ---------- end macro hygiene ----------
-
+#include "compile_utils/zed_safe_include.hpp"
 #include "stereo_camera_kernels.cuh"
 
 #include <atomic>
