@@ -1,32 +1,38 @@
 // stereo_camera.hpp
 #pragma once
 
-// Only push if defined; then undef before including ZED
+// ---------- Neutralize any Vector2/3/4 macros exactly at the ZED include site ----------
 #ifdef Vector2
   #pragma push_macro("Vector2")
   #undef Vector2
+  #define HAD_MACRO_Vector2 1
 #endif
 #ifdef Vector3
   #pragma push_macro("Vector3")
   #undef Vector3
+  #define HAD_MACRO_Vector3 1
 #endif
 #ifdef Vector4
   #pragma push_macro("Vector4")
   #undef Vector4
+  #define HAD_MACRO_Vector4 1
 #endif
 
-#include <sl/Camera.hpp>   // <-- safe now
+#include <sl/Camera.hpp>   // include ZED first, while Vector* macros are undef'd
 
-// Restore only those that were pushed
-#ifdef Vector2
+#ifdef HAD_MACRO_Vector2
   #pragma pop_macro("Vector2")
+  #undef HAD_MACRO_Vector2
 #endif
-#ifdef Vector3
+#ifdef HAD_MACRO_Vector3
   #pragma pop_macro("Vector3")
+  #undef HAD_MACRO_Vector3
 #endif
-#ifdef Vector4
+#ifdef HAD_MACRO_Vector4
   #pragma pop_macro("Vector4")
+  #undef HAD_MACRO_Vector4
 #endif
+// ---------- end macro hygiene ----------
 
 #include "stereo_camera_kernels.cuh"
 
@@ -41,6 +47,7 @@
 #include <iostream>
 #include <thread>
 #include <stop_token>
+#include <memory>
 
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
@@ -98,6 +105,10 @@ struct DetsGpuDesc {
     uint64_t    ts_ns{0};
     cudaEvent_t ready_event{nullptr};   // recorded on the producing (inference) stream
 };
+
+// Convenience aliases for tracked detections
+using TrkVec  = std::vector<Trk2D>;
+using TrkSnap = std::shared_ptr<const TrkVec>;
 
 // -----------------------------------------------------------------------------
 // Camera module
@@ -159,15 +170,13 @@ public:
     cudaStream_t stream() const { return stream_; }
     bool snapshotFrame(GpuFrameDesc& out) const { return latest_.snapshot(out); }
     bool snapshotTracked(std::vector<Trk2D>& out) const {
-        TrkSnapshot snap;
+        TrkSnap snap;
         if (!latest_trk_.snapshot(snap) || !snap) return false;
-        out = *snap;
+        out = *snap; // copy into caller's buffer
         return true;
     }
 
 private:
-    using TrkSnapshot = std::shared_ptr<const std::vector<Trk2D>>;
-
     // --- helpers ---
     static uint64_t now_ns() {
         using namespace std::chrono;
@@ -251,7 +260,7 @@ private:
         // 1) Grab
         if (zed_.grab(runtime_) != sl::ERROR_CODE::SUCCESS) return false;
 
-        // 2) Retrieve directly to GPU at W_×H_ on our stream (supported in your SDK)
+        // 2) Retrieve directly to GPU at W_×H_ on our stream
         if (zed_.retrieveImage(frame_gpu_, sl::VIEW::LEFT, sl::MEM::GPU,
                                sl::Resolution(W_, H_), stream_) != sl::ERROR_CODE::SUCCESS) {
             return false;
@@ -312,7 +321,6 @@ private:
                 sl::CustomBoxObjectData o;
                 o.unique_object_id = sl::generate_unique_id();
                 o.probability = conf; o.label = cls; o.is_grounded = true;
-                // cast to avoid narrowing warnings if needed
                 o.bounding_box_2d = {
                     {static_cast<uint32_t>(x0), static_cast<uint32_t>(y0)},
                     {static_cast<uint32_t>(x1), static_cast<uint32_t>(y0)},
@@ -328,7 +336,7 @@ private:
         sl::Objects objs_out;
         if (zed_.retrieveObjects(objs_out, sl::ObjectDetectionRuntimeParameters{}) ==
             sl::ERROR_CODE::SUCCESS) {
-            std::vector<Trk2D> v; v.reserve(objs_out.object_list.size());
+            TrkVec v; v.reserve(objs_out.object_list.size());
             for (const auto& o : objs_out.object_list) {
                 const auto& bb = o.bounding_box_2d;
                 float x0 = std::min({bb[0].x,bb[1].x,bb[2].x,bb[3].x});
@@ -339,7 +347,7 @@ private:
                     static_cast<uint64_t>(o.id), (int)o.label, o.confidence, x0,y0,x1,y1
                 });
             }
-            auto owned = std::make_shared<const std::vector<Trk2D>>(std::move(v));
+            auto owned = std::make_shared<const TrkVec>(std::move(v));
             latest_trk_.publish(owned);
         }
     }
@@ -372,7 +380,6 @@ private:
         if (h_dets_)   { cudaFreeHost(h_dets_); h_dets_ = nullptr; }
         if (frame_gpu_.isInit()) frame_gpu_.free();
         if (zed_.isOpened()) zed_.close();
-        if (h_dets_) { cudaFreeHost(h_dets_); h_dets_ = nullptr; }
         h_dets_bytes_ = 0;
     }
 
@@ -393,8 +400,7 @@ private:
     LatestOnlyT<GpuFrameDesc>   latest_dets_gpu_; // YOLO dets descriptor (GPU)
     std::atomic<cudaEvent_t>    ready_event_{nullptr};
 
-    // In CameraModule private section
-    LatestOnlyT<std::shared_ptr<std::vector<Trk2D>>> latest_trk_{};
+    LatestOnlyT<TrkSnap>        latest_trk_{};   // tracked det snapshots (const)
 
     void*   h_dets_ = nullptr;         // pinned host buffer for dets
     size_t  h_dets_bytes_ = 0;         // size of pinned host buffer
