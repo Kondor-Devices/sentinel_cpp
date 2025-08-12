@@ -1,3 +1,6 @@
+#undef Vector2
+#undef Vector3
+#undef Vector4
 #include "stereo_camera/stereo_camera.hpp"
 #include "utils/input_sources.hpp"
 #include "yolo_manager/yolo_manager.hpp"

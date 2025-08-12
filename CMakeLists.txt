@@ -91,5 +91,9 @@ if(CMAKE_CUDA_COMPILER)
   )
 endif()
 
+target_compile_options(sentinel_app PRIVATE
+  $<$<COMPILE_LANGUAGE:CXX>:-include ${CMAKE_SOURCE_DIR}/src/compile_utils/kill_vector_macros.hpp>
+)
+
 # ---- Install (optional) ----
 install(TARGETS sentinel_app RUNTIME DESTINATION bin)
