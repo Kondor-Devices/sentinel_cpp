@@ -57,7 +57,9 @@ target_include_directories(sentinel_app SYSTEM PRIVATE ${ZED_INCLUDE_DIR})
 
 # Undef any stray Vector* macros for C++ compilations (fixes ZED constructor parse errors)
 target_compile_options(sentinel_app PRIVATE
-  $<$<COMPILE_LANGUAGE:CXX>:-UVector2 -UVector3 -UVector4>
+  $<$<COMPILE_LANGUAGE:CXX>:-UVector2>
+  $<$<COMPILE_LANGUAGE:CXX>:-UVector3>
+  $<$<COMPILE_LANGUAGE:CXX>:-UVector4>
 )
 
 # Libraries
