@@ -14,6 +14,12 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
+target_include_directories(sentinel_app
+  PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    /usr/local/zed/include
+)
+
 # Warnings (tweak to taste)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -Wno-unknown-pragmas)

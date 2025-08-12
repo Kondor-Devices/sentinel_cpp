@@ -1,7 +1,6 @@
 // stereo_camera.hpp
 #pragma once
 
-
 #include "compile_utils/zed_safe_include.hpp"
 #include "stereo_camera_kernels.cuh"
 
