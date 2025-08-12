@@ -55,7 +55,10 @@ target_include_directories(sentinel_app
 # Treat ZED headers as system to silence their warnings
 target_include_directories(sentinel_app SYSTEM PRIVATE ${ZED_INCLUDE_DIR})
 
-# Undef any stray Vector* macros for C++ compilations (fixes ZED constructor parse errors)
+# Global hammer: remove any Vector* macros for all C/C++
+add_compile_options(-UVector2 -UVector3 -UVector4)
+
+# Per-language (CXX) in case you keep CUDA/C mixed:
 target_compile_options(sentinel_app PRIVATE
   $<$<COMPILE_LANGUAGE:CXX>:-UVector2>
   $<$<COMPILE_LANGUAGE:CXX>:-UVector3>
