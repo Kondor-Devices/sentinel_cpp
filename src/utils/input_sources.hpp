@@ -1,5 +1,5 @@
 #pragma once
-#include <sl/Camera.hpp>
+#include "compile_utils/zed_safe_include.hpp"
 #include <vector>
 #include <string>
 #include <cstdint>

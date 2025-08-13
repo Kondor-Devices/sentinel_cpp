@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 project(SentinelCpp LANGUAGES CXX CUDA)
 
 # ---- Build options ----
-set(CMAKE_CXX_STANDARD 20)                # drop to 17 if ZED complains
+set(CMAKE_CXX_STANDARD 17)                # drop to 17 if ZED complains
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
@@ -43,6 +43,21 @@ endif()
 # ---- Executable ----
 add_executable(sentinel_app ${SRC_FILES})
 
+# make sure CUDA is enabled for the target
+enable_language(CUDA)
+
+# add your .cu files to the target
+file(GLOB_RECURSE CUDA_SRC CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cu")
+target_sources(sentinel_app PRIVATE ${CUDA_SRC})
+
+# link cudart (you already do, keep it)
+# target_link_libraries(sentinel_app PRIVATE CUDA::cudart)
+
+# optional but fine:
+set_target_properties(sentinel_app PROPERTIES
+  CUDA_SEPARABLE_COMPILATION ON
+)
+
 # Include paths (AFTER add_executable)
 target_include_directories(sentinel_app
   PRIVATE
@@ -52,12 +67,6 @@ target_include_directories(sentinel_app
 # Treat ZED headers as system to hush their warnings
 target_include_directories(sentinel_app SYSTEM PRIVATE ${ZED_INCLUDE_DIR})
 
-# Inject the macro-killer header BEFORE every C++ TU
-# (must be two separate args so compilers parse it)
-target_compile_options(sentinel_app PRIVATE
-  $<$<COMPILE_LANGUAGE:CXX>:-include>
-  $<$<COMPILE_LANGUAGE:CXX>:${CMAKE_SOURCE_DIR}/src/compile_utils/kill_vector_macros.hpp>
-)
 
 # Link libraries
 target_link_libraries(sentinel_app

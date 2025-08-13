@@ -8,6 +8,7 @@
 #include <cuda_runtime.h>
 
 #include "stereo_camera/stereo_camera.hpp"   // CameraModule, DetsGpuDesc, GpuFrameDesc
+#include "compat/jthread_compat.hpp"
 
 class YoloManager {
 public:
@@ -39,7 +40,7 @@ public:
             }
         }
 
-        worker_ = std::jthread([this](std::stop_token st){
+        worker_ =jthread_compat::jthread([this](jthread_compat::stop_token st){
             // Main loop: poll cameras and publish "empty" detections with a recorded event
             while (!st.stop_requested() && running_.load(std::memory_order_relaxed)) {
                 bool did_something = false;
@@ -98,6 +99,6 @@ private:
     };
 
     std::vector<CamSlot> slots_;
-    std::jthread         worker_;
+    jthread_compat::jthread         worker_;
     std::atomic<bool>    running_{false};
 };

@@ -3,6 +3,7 @@
 
 #include "compile_utils/zed_safe_include.hpp"
 #include "stereo_camera_kernels.cuh"
+#include "compat/jthread_compat.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -113,13 +114,13 @@ public:
     void start_from_svo(const std::string& path, bool recording, const std::string& out) {
         if (running_.exchange(true)) return;
         init_from_svo(path, recording, out);
-        worker_ = std::jthread([this](std::stop_token st){ run_loop(st); });
+        worker_ = jthread_compat::jthread([this](jthread_compat::stop_token st){ run_loop(st); });
     }
 
     void start_from_serial(uint32_t serial, bool recording, const std::string& out) {
         if (running_.exchange(true)) return;
         init_from_serial(serial, recording, out);
-        worker_ = std::jthread([this](std::stop_token st){ run_loop(st); });
+        worker_ = jthread_compat::jthread([this](jthread_compat::stop_token st){ run_loop(st); });
     }
 
     void stop() {
@@ -197,7 +198,7 @@ private:
         prep_desc_template();
     }
 
-    void run_loop(std::stop_token st){
+    void run_loop(jthread_compat::stop_token st){
         // Make ZED CUDA context current on this thread
         CUcontext zed_ctx = zed_.getCUDAContext();
         cuCtxSetCurrent(zed_ctx);
@@ -373,6 +374,6 @@ private:
     void*   h_dets_ = nullptr;         // pinned host buffer for dets
     size_t  h_dets_bytes_ = 0;         // size of pinned host buffer
 
-    std::jthread           worker_;
+    jthread_compat::jthread           worker_;
     std::atomic<bool>      running_{false};
 };
