@@ -1,3 +1,4 @@
+// visualizer/batch_viewer.hpp
 #pragma once
 #include <atomic>
 #include <chrono>
@@ -16,9 +17,9 @@
 #include <unistd.h>
 
 #include <opencv2/opencv.hpp>
+#include <cuda_fp16.h>  // for __fp16
 
 #include "visualizer/ipc_common.hpp"
-
 
 // ---------- ViewerProcess: forks a child that runs the OpenCV viewer ----------
 class ViewerProcess {
@@ -28,13 +29,14 @@ public:
         bool per_camera_windows = true;   // one window per camera
         int waitkey_ms = 10;              // UI poll interval
         int cascade_offset = 40;          // per-window offset when cascading
+        int base_x = 50;
+        int base_y = 50;
     };
 
     ViewerProcess() = default;
     explicit ViewerProcess(Options opt) : opt_(std::move(opt)) {}
 
     // Forks and starts the viewer loop in the child. Parent returns immediately.
-    // Returns true in the parent on success.
     bool start() {
         if (running_) return true;
         pid_ = ::fork();
@@ -104,8 +106,8 @@ private:
         uint8_t* dst = out.data;
 
         auto sat = [](float v)->uint8_t {
-            if (v < 0.f) { v = 0.f; }
-            if (v > 1.f) { v = 1.f; }
+            if (v < 0.f) v = 0.f;
+            if (v > 1.f) v = 1.f;
             return static_cast<uint8_t>(v * 255.f + 0.5f);
         };
 
@@ -123,7 +125,7 @@ private:
     }
 
     [[noreturn]] void run_child() {
-        // Map frames.
+        // Map frames
         const void* base = nullptr; size_t bytes = 0;
         if (!map_frames_shm(opt_.shm_name, base, bytes)) {
             std::cerr << "[viewer] cannot map frames shm: " << opt_.shm_name << "\n";
@@ -134,31 +136,34 @@ private:
             std::cerr << "[viewer] bad header/magic/version\n";
             _exit(3);
         }
+
         const int N = hdr->N, C = hdr->C, H = hdr->H, W = hdr->W;
+        if (N <= 0) {
+            std::cerr << "[viewer] N<=0, nothing to show\n";
+            ::munmap(const_cast<void*>(base), bytes);
+            _exit(0);
+        }
         const size_t per_cam_bytes = static_cast<size_t>(C) * H * W * sizeof(__fp16);
         auto* data = reinterpret_cast<const uint8_t*>(base) + sizeof(ipc::BatchHeader);
 
-        uint64_t mask = hdr->valid_mask;
+        std::cout << "[viewer] mapped batch: N=" << N
+                  << " C=" << C << " H=" << H << " W=" << W
+                  << " per_cam_bytes=" << per_cam_bytes << std::endl;
 
-        // Windows
-        std::vector<std::string> names(N);
+        // Create unique windows once
+        std::vector<std::string> names;
+        names.reserve(N);
         for (int i=0; i<N; ++i) {
-            if (((mask >> i) & 1ull) == 0ull) {
-                // No fresh frame for this cam in this batch — show a placeholder
-                cv::Mat blank(H, W, CV_8UC3, cv::Scalar(40,40,40));
-                cv::putText(blank, "NO DATA", {20, 50}, cv::FONT_HERSHEY_SIMPLEX, 1.0, {220,220,220}, 2);
-                cv::imshow(names[i], blank);
-                continue;
+            names.emplace_back("cam_" + std::to_string(i));
+            cv::namedWindow(names.back(), cv::WINDOW_AUTOSIZE);
+            if (opt_.per_camera_windows) {
+                cv::moveWindow(names.back(),
+                               opt_.base_x + i * opt_.cascade_offset,
+                               opt_.base_y + i * opt_.cascade_offset);
             }
-
-            const auto* src = reinterpret_cast<const __fp16*>(
-                data + static_cast<size_t>(i)*per_cam_bytes
-            );
-            cv::Mat img = nchw_fp16_rgb_to_bgr8(src, C, H, W);
-            // (detections overlay goes here later)
-            cv::imshow(names[i], img);
         }
 
+        // Main loop
         uint64_t last_seq = ~0ull;
         while (true) {
             uint64_t s1 = hdr->seq.load(std::memory_order_acquire);
@@ -166,23 +171,36 @@ private:
                 std::atomic_thread_fence(std::memory_order_acquire);
                 uint64_t s2 = hdr->seq.load(std::memory_order_acquire);
                 if (s1 == s2) {
+                    uint64_t mask = hdr->valid_mask; // refresh each frame
                     for (int i=0; i<N; ++i) {
-                        auto* src = reinterpret_cast<const __fp16*>(data + static_cast<size_t>(i)*per_cam_bytes);
+                        if (((mask >> i) & 1ull) == 0ull) {
+                            cv::Mat blank(H, W, CV_8UC3, cv::Scalar(40,40,40));
+                            cv::putText(blank, "NO DATA", {20, 50},
+                                        cv::FONT_HERSHEY_SIMPLEX, 1.0, {220,220,220}, 2);
+                            cv::imshow(names[i], blank);
+                            continue;
+                        }
+                        const auto* src = reinterpret_cast<const __fp16*>(
+                            data + static_cast<size_t>(i) * per_cam_bytes
+                        );
                         cv::Mat img = nchw_fp16_rgb_to_bgr8(src, C, H, W);
-
                         // (detections overlay goes here later)
-
                         cv::imshow(names[i], img);
                     }
                     last_seq = s1;
                 }
             }
+
             int key = cv::waitKey(opt_.waitkey_ms);
-            if (key == 27 || key == 'q') break;
+            if (key == 27 || key == 'q') {
+                ::kill(getppid(), SIGINT);  // tell parent to stop
+                break;
+            }
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
 
-        // Cleanup and exit child.
+        // Cleanup
+        for (auto& n : names) cv::destroyWindow(n);
         ::munmap(const_cast<void*>(base), bytes);
         _exit(0);
     }
